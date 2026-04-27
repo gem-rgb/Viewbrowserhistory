@@ -3,15 +3,17 @@
  *
  * A native C program that directly reads Brave Browser's SQLite history
  * database from disk, bypassing all browser API limitations.
+ * Can also import data from the Incognito History Tracker extension.
  *
  * Usage:
- *   brave-history                          # JSON to stdout summary
- *   brave-history --json output.json       # Export full history as JSON
- *   brave-history --pdf  report.pdf        # Generate styled PDF report
- *   brave-history --days 7                 # Only last 7 days
- *   brave-history --json out.json --pdf report.pdf --days 30
+ *   brave-history                                        # summary to console
+ *   brave-history --json output.json                     # export as JSON
+ *   brave-history --pdf  report.pdf                      # styled PDF report
+ *   brave-history --days 7                               # last 7 days only
+ *   brave-history --import ext-export.json               # import extension data
+ *   brave-history --import ext.json --pdf combined.pdf   # merge + export
  *
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 #include <stdio.h>
@@ -22,10 +24,11 @@
 #include "history_db.h"
 #include "export_json.h"
 #include "export_pdf.h"
+#include "import_ext.h"
 
 /* ── Version ─────────────────────────────────────────────────────── */
 
-#define VERSION "1.0.0"
+#define VERSION "2.0.0"
 
 /* ── Usage / Help ────────────────────────────────────────────────── */
 
@@ -42,16 +45,20 @@ static void print_banner(void) {
 static void print_usage(const char *progname) {
     printf("Usage: %s [OPTIONS]\n\n", progname);
     printf("Options:\n");
-    printf("  --json <file>    Export history to JSON file\n");
-    printf("  --pdf  <file>    Generate styled PDF report\n");
-    printf("  --days <N>       Only include last N days (default: all)\n");
-    printf("  --db   <file>    Use a specific History database file\n");
-    printf("  --help           Show this help message\n");
-    printf("  --version        Show version\n");
+    printf("  --json   <file>   Export history to JSON file\n");
+    printf("  --pdf    <file>   Generate styled PDF report\n");
+    printf("  --days   <N>      Only include last N days (default: all)\n");
+    printf("  --db     <file>   Use a specific History database file\n");
+    printf("  --import <file>   Import extension-exported JSON (can repeat)\n");
+    printf("  --no-db           Skip native DB, use only --import data\n");
+    printf("  --help            Show this help message\n");
+    printf("  --version         Show version\n");
     printf("\nExamples:\n");
     printf("  %s --json history.json\n", progname);
     printf("  %s --pdf report.pdf --days 30\n", progname);
-    printf("  %s --json out.json --pdf out.pdf\n", progname);
+    printf("  %s --import tracked.json --pdf incognito-report.pdf\n", progname);
+    printf("  %s --import ext.json --json combined.json --pdf combined.pdf\n", progname);
+    printf("  %s --no-db --import ext.json --pdf ext-only.pdf\n", progname);
     printf("\n");
 }
 
@@ -87,11 +94,16 @@ static void print_summary(const HistoryResult *result, const HistoryStats *stats
 
 /* ── Main ────────────────────────────────────────────────────────── */
 
+#define MAX_IMPORTS 16
+
 int main(int argc, char *argv[]) {
     const char *json_path = NULL;
     const char *pdf_path  = NULL;
     const char *db_path   = NULL;
-    int days_back = 0;    /* 0 = all history */
+    const char *import_paths[MAX_IMPORTS];
+    int import_count = 0;
+    int days_back = 0;
+    int skip_native_db = 0;
 
     /* Parse arguments */
     for (int i = 1; i < argc; i++) {
@@ -113,6 +125,15 @@ int main(int argc, char *argv[]) {
             if (days_back < 0) days_back = 0;
         } else if (strcmp(argv[i], "--db") == 0 && i + 1 < argc) {
             db_path = argv[++i];
+        } else if (strcmp(argv[i], "--import") == 0 && i + 1 < argc) {
+            if (import_count < MAX_IMPORTS) {
+                import_paths[import_count++] = argv[++i];
+            } else {
+                fprintf(stderr, "  WARNING: Too many --import files (max %d)\n", MAX_IMPORTS);
+                i++;
+            }
+        } else if (strcmp(argv[i], "--no-db") == 0) {
+            skip_native_db = 1;
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             print_usage(argv[0]);
@@ -126,68 +147,111 @@ int main(int argc, char *argv[]) {
     Platform plat = platform_detect();
     printf("  Platform: %s\n", platform_name(plat));
 
-    /* Locate the History database */
-    char brave_path[1024];
-    char temp_path[1024];
-    int using_custom_db = 0;
-
-    if (db_path) {
-        /* User specified a database file directly */
-        strncpy(brave_path, db_path, sizeof(brave_path) - 1);
-        brave_path[sizeof(brave_path) - 1] = '\0';
-
-        if (!platform_file_exists(brave_path)) {
-            fprintf(stderr, "\n  ERROR: Specified database not found: %s\n\n", brave_path);
-            return 1;
-        }
-        printf("  Database: %s (user-specified)\n", brave_path);
-        using_custom_db = 1;
-    } else {
-        if (platform_get_brave_history_path(brave_path, sizeof(brave_path)) != 0) {
-            fprintf(stderr, "\n  ERROR: Brave Browser history database not found.\n");
-            fprintf(stderr, "  Make sure Brave is installed on this system.\n");
-            fprintf(stderr, "  You can also specify a database with --db <path>\n\n");
-            return 1;
-        }
-        printf("  Database: %s\n", brave_path);
-    }
-
-    /* Copy the database (Brave locks it while running) */
-    if (using_custom_db) {
-        /* If user specified a DB, use it directly (they may have already copied it) */
-        strncpy(temp_path, brave_path, sizeof(temp_path) - 1);
-        temp_path[sizeof(temp_path) - 1] = '\0';
-    } else {
-        if (platform_get_temp_db_path(temp_path, sizeof(temp_path)) != 0) {
-            fprintf(stderr, "\n  ERROR: Cannot determine temp path\n\n");
-            return 1;
-        }
-
-        printf("  Copying database to: %s\n", temp_path);
-        if (platform_copy_file(brave_path, temp_path) != 0) {
-            fprintf(stderr, "\n  ERROR: Cannot copy history database.\n");
-            fprintf(stderr, "  This may happen if Brave is currently running and locks the file.\n");
-            fprintf(stderr, "  Try closing Brave, or copy the file manually and use --db.\n\n");
-            return 1;
-        }
-    }
-
-    printf("  Days back: %s\n", days_back > 0 ? "" : "all");
-    if (days_back > 0) printf("  %d days\n", days_back);
-
-    /* Query the database */
-    printf("\n  Querying database...\n");
     HistoryResult result;
-    if (history_db_query(temp_path, days_back, &result) != 0) {
-        fprintf(stderr, "\n  ERROR: Failed to query history database\n\n");
-        if (!using_custom_db) platform_delete_file(temp_path);
-        return 1;
+    history_result_init(&result);
+
+    int have_native = 0;
+    char temp_path[1024] = {0};
+
+    /* ── Native Brave DB ─────────────────────────────────────────── */
+
+    if (!skip_native_db) {
+        char brave_path[1024];
+        int using_custom_db = 0;
+
+        if (db_path) {
+            strncpy(brave_path, db_path, sizeof(brave_path) - 1);
+            brave_path[sizeof(brave_path) - 1] = '\0';
+
+            if (!platform_file_exists(brave_path)) {
+                fprintf(stderr, "\n  ERROR: Specified database not found: %s\n\n", brave_path);
+                if (import_count == 0) return 1;
+                printf("  Continuing with import-only mode...\n");
+                goto skip_db;
+            }
+            printf("  Database: %s (user-specified)\n", brave_path);
+            using_custom_db = 1;
+        } else {
+            if (platform_get_brave_history_path(brave_path, sizeof(brave_path)) != 0) {
+                if (import_count > 0) {
+                    printf("  Brave DB not found — using import-only mode\n");
+                    goto skip_db;
+                }
+                fprintf(stderr, "\n  ERROR: Brave Browser history database not found.\n");
+                fprintf(stderr, "  Make sure Brave is installed, or use --import / --db.\n\n");
+                return 1;
+            }
+            printf("  Database: %s\n", brave_path);
+        }
+
+        /* Copy the database (Brave locks it while running) */
+        if (using_custom_db) {
+            strncpy(temp_path, brave_path, sizeof(temp_path) - 1);
+        } else {
+            if (platform_get_temp_db_path(temp_path, sizeof(temp_path)) != 0) {
+                fprintf(stderr, "\n  ERROR: Cannot determine temp path\n\n");
+                if (import_count == 0) return 1;
+                goto skip_db;
+            }
+
+            printf("  Copying database to: %s\n", temp_path);
+            if (platform_copy_file(brave_path, temp_path) != 0) {
+                fprintf(stderr, "  WARNING: Cannot copy history database (Brave may be running)\n");
+                if (import_count == 0) {
+                    fprintf(stderr, "  Try closing Brave, or use --db / --import.\n\n");
+                    return 1;
+                }
+                printf("  Continuing with import-only mode...\n");
+                temp_path[0] = '\0';
+                goto skip_db;
+            }
+        }
+
+        printf("  Days back: %s\n", days_back > 0 ? "" : "all");
+        if (days_back > 0) printf("  %d days\n", days_back);
+
+        printf("\n  Querying native database...\n");
+        if (history_db_query(temp_path, days_back, &result) != 0) {
+            fprintf(stderr, "  WARNING: Failed to query native database\n");
+            if (import_count == 0) {
+                if (!using_custom_db && temp_path[0]) platform_delete_file(temp_path);
+                return 1;
+            }
+        } else {
+            have_native = 1;
+            printf("  Native DB: %d entries\n", result.count);
+        }
     }
+
+skip_db:
+
+    /* ── Import extension data ───────────────────────────────────── */
+
+    if (import_count > 0) {
+        printf("\n  Importing extension data...\n");
+        for (int i = 0; i < import_count; i++) {
+            printf("  [%d/%d] %s\n", i + 1, import_count, import_paths[i]);
+
+            if (!platform_file_exists(import_paths[i])) {
+                fprintf(stderr, "    WARNING: File not found, skipping\n");
+                continue;
+            }
+
+            int before = result.count;
+            if (import_extension_json(import_paths[i], &result) == 0) {
+                printf("    Added %d entries\n", result.count - before);
+            } else {
+                fprintf(stderr, "    WARNING: Import failed\n");
+            }
+        }
+    }
+
+    /* ── Check we have data ──────────────────────────────────────── */
 
     if (result.count == 0) {
         printf("\n  No history entries found.\n\n");
         history_result_free(&result);
-        if (!using_custom_db) platform_delete_file(temp_path);
+        if (!skip_native_db && temp_path[0]) platform_delete_file(temp_path);
         return 0;
     }
 
@@ -221,7 +285,7 @@ int main(int argc, char *argv[]) {
 
     /* Cleanup */
     history_result_free(&result);
-    if (!using_custom_db) {
+    if (!skip_native_db && temp_path[0]) {
         platform_delete_file(temp_path);
     }
 

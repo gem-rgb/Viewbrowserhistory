@@ -1,0 +1,445 @@
+/* ── popup.css — Incognito History Tracker Extension UI ─────────── */
+
+:root {
+    --bg-primary:     #1a1a2e;
+    --bg-secondary:   #16213e;
+    --bg-card:        #1e2a47;
+    --bg-hover:       #253253;
+    --text-primary:   #e8e8f0;
+    --text-secondary: #a0a0b8;
+    --text-muted:     #6b6b85;
+    --accent-orange:  #ff6b35;
+    --accent-blue:    #4da6ff;
+    --accent-green:   #4ecb71;
+    --accent-red:     #ff4757;
+    --accent-purple:  #a855f7;
+    --border:         rgba(255, 255, 255, 0.06);
+    --radius:         8px;
+    --radius-sm:      5px;
+    --shadow:         0 4px 20px rgba(0, 0, 0, 0.3);
+    --transition:     0.2s ease;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    width: 420px;
+    max-height: 580px;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 13px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── Header ──────────────────────────────────────────────────────── */
+
+header {
+    background: linear-gradient(135deg, var(--bg-secondary), #1a2744);
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+.header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.header-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.header-icon {
+    font-size: 18px;
+}
+
+h1 {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+}
+
+.badge {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 3px 8px;
+    border-radius: 10px;
+}
+
+.badge-active {
+    background: rgba(78, 203, 113, 0.15);
+    color: var(--accent-green);
+    border: 1px solid rgba(78, 203, 113, 0.3);
+}
+
+/* ── Stats Bar ───────────────────────────────────────────────────── */
+
+.stats-bar {
+    display: flex;
+    gap: 2px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: var(--radius);
+    padding: 2px;
+}
+
+.stat {
+    flex: 1;
+    text-align: center;
+    padding: 8px 4px;
+    border-radius: var(--radius-sm);
+    transition: background var(--transition);
+}
+
+.stat:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.stat-value {
+    display: block;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.2;
+}
+
+.stat-incognito { color: var(--accent-orange) !important; }
+.stat-normal    { color: var(--accent-blue) !important; }
+
+.stat-label {
+    display: block;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────── */
+
+.toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+}
+
+.filter-group {
+    display: flex;
+    gap: 4px;
+}
+
+.filter-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.filter-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+}
+
+.filter-btn.active {
+    background: var(--accent-orange);
+    border-color: var(--accent-orange);
+    color: white;
+}
+
+.action-group {
+    display: flex;
+    gap: 4px;
+}
+
+.action-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.export-btn:hover {
+    background: rgba(78, 203, 113, 0.1);
+    border-color: var(--accent-green);
+    color: var(--accent-green);
+}
+
+.clear-btn:hover {
+    background: rgba(255, 71, 87, 0.1);
+    border-color: var(--accent-red);
+    color: var(--accent-red);
+}
+
+/* ── Search ──────────────────────────────────────────────────────── */
+
+.search-bar {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+}
+
+.search-bar input {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 7px 12px;
+    font-size: 12px;
+    color: var(--text-primary);
+    outline: none;
+    transition: border-color var(--transition);
+}
+
+.search-bar input::placeholder {
+    color: var(--text-muted);
+}
+
+.search-bar input:focus {
+    border-color: var(--accent-orange);
+}
+
+/* ── History List ────────────────────────────────────────────────── */
+
+.history-container {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 340px;
+}
+
+.history-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.history-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.history-container::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+}
+
+.history-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.history-list {
+    list-style: none;
+    padding: 4px 0;
+}
+
+.history-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+    transition: background var(--transition);
+    cursor: default;
+}
+
+.history-item:hover {
+    background: var(--bg-hover);
+}
+
+.history-item.incognito {
+    border-left: 2px solid var(--accent-orange);
+}
+
+.history-item.normal {
+    border-left: 2px solid var(--accent-blue);
+}
+
+.item-favicon {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    margin-top: 2px;
+    flex-shrink: 0;
+    background: var(--bg-card);
+}
+
+.item-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.item-title {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 2px;
+}
+
+.item-url {
+    font-size: 10px;
+    color: var(--accent-blue);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.8;
+}
+
+.item-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 3px;
+}
+
+.item-time {
+    font-size: 9px;
+    color: var(--text-muted);
+}
+
+.item-badge-incognito {
+    font-size: 9px;
+    color: var(--accent-orange);
+    background: rgba(255, 107, 53, 0.1);
+    padding: 1px 5px;
+    border-radius: 3px;
+}
+
+/* ── Loading State ───────────────────────────────────────────────── */
+
+.loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 0;
+    gap: 12px;
+    color: var(--text-muted);
+}
+
+.spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent-orange);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ── Empty State ─────────────────────────────────────────────────── */
+
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-muted);
+}
+
+.empty-icon {
+    font-size: 32px;
+    display: block;
+    margin-bottom: 8px;
+}
+
+.empty-sub {
+    font-size: 11px;
+    margin-top: 4px;
+    opacity: 0.7;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────── */
+
+footer {
+    padding: 8px 14px;
+    font-size: 10px;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border);
+    background: var(--bg-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.footer-sep {
+    opacity: 0.3;
+}
+
+/* ── Confirm Dialog ──────────────────────────────────────────────── */
+
+.confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+
+.confirm-dialog {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    width: 300px;
+    box-shadow: var(--shadow);
+}
+
+.confirm-dialog h3 {
+    font-size: 14px;
+    margin-bottom: 8px;
+}
+
+.confirm-dialog p {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+}
+
+.confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.confirm-actions button {
+    padding: 6px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    cursor: pointer;
+    border: none;
+}
+
+.btn-cancel {
+    background: transparent;
+    border: 1px solid var(--border) !important;
+    color: var(--text-secondary);
+}
+
+.btn-confirm-delete {
+    background: var(--accent-red);
+    color: white;
+}

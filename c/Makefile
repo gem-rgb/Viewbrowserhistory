@@ -10,6 +10,7 @@ SRCS = brave_history.c \
        history_db.c    \
        export_json.c   \
        export_pdf.c    \
+       import_ext.c    \
        platform.c      \
        vendor/sqlite3.c
 

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>History Tracker</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <!-- Header -->
+    <header id="header">
+        <div class="header-top">
+            <div class="header-title">
+                <span class="header-icon">🔍</span>
+                <h1>History Tracker</h1>
+            </div>
+            <span id="status-badge" class="badge badge-active">Active</span>
+        </div>
+        <div id="stats-bar" class="stats-bar">
+            <div class="stat">
+                <span class="stat-value" id="stat-total">—</span>
+                <span class="stat-label">Total</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value stat-incognito" id="stat-incognito">—</span>
+                <span class="stat-label">Incognito</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value stat-normal" id="stat-normal">—</span>
+                <span class="stat-label">Normal</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value" id="stat-domains">—</span>
+                <span class="stat-label">Domains</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Toolbar -->
+    <div id="toolbar" class="toolbar">
+        <div class="filter-group">
+            <button class="filter-btn active" data-filter="all" id="btn-filter-all">All</button>
+            <button class="filter-btn" data-filter="incognito" id="btn-filter-incognito">🔒 Incognito</button>
+            <button class="filter-btn" data-filter="normal" id="btn-filter-normal">Normal</button>
+        </div>
+        <div class="action-group">
+            <button id="btn-export" class="action-btn export-btn" title="Export JSON">
+                ⬇ Export
+            </button>
+            <button id="btn-clear" class="action-btn clear-btn" title="Clear all history">
+                🗑 Clear
+            </button>
+        </div>
+    </div>
+
+    <!-- Search -->
+    <div class="search-bar">
+        <input type="text" id="search-input" placeholder="Search URLs and titles..." autocomplete="off">
+    </div>
+
+    <!-- History List -->
+    <div id="history-container" class="history-container">
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <span>Loading history...</span>
+        </div>
+        <ul id="history-list" class="history-list"></ul>
+        <div id="empty-state" class="empty-state" style="display:none">
+            <span class="empty-icon">📭</span>
+            <p>No history entries yet</p>
+            <p class="empty-sub">Browse some pages and they'll appear here</p>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer id="footer">
+        <span>Tracking since <span id="tracking-since">—</span></span>
+        <span class="footer-sep">•</span>
+        <span>v2.0.0</span>
+    </footer>
+
+    <script src="popup.js"></script>
+</body>
+</html>

@@ -23,6 +23,7 @@ if %ERRORLEVEL% EQU 0 (
         history_db.c ^
         export_json.c ^
         export_pdf.c ^
+        import_ext.c ^
         platform.c ^
         vendor\sqlite3.c ^
         -lshell32 -lole32
@@ -51,6 +52,7 @@ if %ERRORLEVEL% EQU 0 (
         history_db.c ^
         export_json.c ^
         export_pdf.c ^
+        import_ext.c ^
         platform.c ^
         vendor\sqlite3.c ^
         shell32.lib ole32.lib
