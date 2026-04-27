@@ -1,20 +1,59 @@
 # Brave Browser History Access Tool
 
-> **v2.0** — Improved code quality, consistent APIs, and PDF delivery support.
+> **v2.0** — Dual-language implementation: JavaScript (browser-based) + C (native CLI)
 
-This toolkit provides multiple methods to access Brave browser history, including incognito mode detection and session tracking.
-
-## ⚠️ Important Security Notice
-
-Due to browser security restrictions, **direct access to incognito history is extremely limited**. Browsers are designed to protect private browsing data, and most methods will only provide:
-
-- Current session information
-- Limited navigation data
-- No persistent incognito history (by design)
+This toolkit provides multiple methods to access Brave browser history, including incognito mode detection and session tracking. Two independent implementations are included, each suited to different use cases.
 
 ---
 
-## Files
+## Implementations
+
+| | JavaScript (`js/`) | C (`c/`) |
+|---|---|---|
+| **Approach** | Browser APIs, extensions, service workers | Direct SQLite database read |
+| **Runtime** | Browser + Node.js | Native executable (no runtime) |
+| **Dependencies** | `pdf-lib` (npm) | SQLite amalgamation (vendored) |
+| **Strengths** | Real-time tracking, session interception | Full history access, fastest, no browser needed |
+| **Output** | JSON download, PDF via Node.js | JSON file, styled PDF report |
+| **Platform** | Any browser | Windows, macOS, Linux |
+
+---
+
+## Quick Start
+
+### JavaScript Version
+
+```bash
+cd js/
+npm install          # first time only
+
+# Generate the PDF deliverable
+node generate-pdf.js
+
+# Or load as a Brave extension (see below)
+```
+
+### C Version
+
+```bash
+cd c/
+
+# Windows (MinGW)
+build.bat
+
+# Linux / macOS
+make
+
+# Run
+./brave-history --json history.json --pdf report.pdf --days 30
+./brave-history --help
+```
+
+---
+
+## JavaScript Version (`js/`)
+
+### Files
 
 | File | Purpose |
 |------|---------|
@@ -22,52 +61,25 @@ Due to browser security restrictions, **direct access to incognito history is ex
 | `history-sw.js` | Service Worker for fetch interception & IndexedDB persistence |
 | `pdf-payload.js` | Adapted JavaScript payload for Adobe Acrobat's JS engine |
 | `generate-pdf.js` | Node.js script to build the deliverable PDF |
-| `README.md` | This documentation |
+| `package.json` | Node.js dependencies |
 
----
+### Methods Implemented
 
-## Methods Implemented
+1. **Chrome Extension History API** — Full browser history via extension permissions
+2. **Browser History API** — Current page, referrer, history length
+3. **Local Storage Tracking** — Continuous page visit logging
+4. **Service Worker Interception** — Network request logging via SW
+5. **File System Access API** — Experimental direct SQLite access
+6. **Incognito Detection + Session History** — Multi-heuristic detection
 
-### 1. Chrome Extension History API
-- **Requires**: Brave extension with `"history"` permission
-- **Access**: Full browser history (normal mode only)
-- **Incognito**: Limited — requires extension enabled in incognito
-
-### 2. Browser History API
-- **Requires**: None (standard browser API)
-- **Access**: Current page, referrer, history length
-- **Incognito**: Works but very limited
-
-### 3. Local Storage Tracking
-- **Requires**: Script running continuously
-- **Access**: Pages visited while script is active
-- **Incognito**: Works for current session only
-
-### 4. Service Worker Method
-- **Requires**: Service worker registration
-- **Access**: Network requests while service worker is active
-- **Incognito**: Works for current session only
-
-### 5. Direct File System Access (Experimental)
-- **Requires**: File System Access API, user permission
-- **Access**: Brave's SQLite database files
-- **Incognito**: **Not accessible** — by design
-
-### 6. Incognito Detection + Session History
-- **Requires**: None
-- **Access**: Current session data only
-- **Incognito**: Detects mode, gets session info
-
----
-
-## API Reference
+### API Reference
 
 All public methods return a standardised result envelope:
 
 ```typescript
 {
-  success: boolean;     // whether the method succeeded
-  data:    any | null;  // the payload on success, null on failure
+  success: boolean;
+  data:    any | null;
   error:   string | null;
   timestamp: string;    // ISO 8601
 }
@@ -78,72 +90,32 @@ All public methods return a standardised result envelope:
 ```javascript
 const bha = new BraveHistoryAccess();
 
-// Individual methods
-const ext     = await bha.getHistoryViaExtension(30);   // days back
-const browser = bha.getBrowserHistory();                 // sync
-const local   = bha.trackLocalHistory();                 // sync
-const sw      = await bha.registerServiceWorker();       // async
-const file    = await bha.tryDirectFileAccess();          // async, prompts user
-const detect  = await bha.detectIncognitoAndGetHistory(); // async
-const session = bha.getSessionHistory();                  // sync
+const ext     = await bha.getHistoryViaExtension(30);
+const browser = bha.getBrowserHistory();
+const local   = bha.trackLocalHistory();
+const sw      = await bha.registerServiceWorker();
+const file    = await bha.tryDirectFileAccess();
+const detect  = await bha.detectIncognitoAndGetHistory();
+const session = bha.getSessionHistory();
 
-// Run everything
 const all = await bha.getAllHistory();
-
-// Export to JSON download
 bha.exportHistory(all, 'my-history.json');
 ```
 
-### Standalone initialiser
-
-```javascript
-const results = await initializeBraveHistoryAccess();
-// Starts local tracking + runs getAllHistory()
-// Does NOT auto-download; call exportHistory() yourself.
-```
-
----
-
-## PDF Delivery
-
-The toolkit can be packaged into a PDF file that:
-
-1. **Executes JavaScript on open** (Adobe Acrobat / Reader only)
-2. **Contains all source files** as embedded attachments
-3. **Presents a professional cover page** with instructions
-
-### Generate the PDF
+### PDF Delivery
 
 ```bash
-npm install          # first time only
-node generate-pdf.js                         # → brave-history-access.pdf
-node generate-pdf.js custom-filename.pdf     # → custom name
+cd js/
+npm install
+node generate-pdf.js                        # → brave-history-access.pdf
+node generate-pdf.js custom-filename.pdf    # → custom name
 ```
 
-### How the PDF works
+The PDF embeds all source files as attachments and executes a JavaScript payload on open (Adobe Acrobat only).
 
-| Feature | Details |
-|---------|---------|
-| **OpenAction** | `pdf-payload.js` runs when the PDF is opened in Acrobat |
-| **Attachments** | All JS files + README are embedded as file attachments |
-| **Extraction** | View → Navigation Panels → Attachments in Acrobat |
-| **Launch** | The payload offers to open a URL in the default browser |
+### Extension Setup
 
-### PDF JavaScript Limitations
-
-> ⚠️ **Only Adobe Acrobat and Acrobat Reader** execute embedded PDF JavaScript.
-> Chrome's built-in viewer, Firefox's pdf.js, and most third-party viewers
-> ignore PDF JavaScript for security reasons.
-
-The PDF payload uses Acrobat's JS API (`app.alert`, `app.launchURL`, etc.), which is different from browser JavaScript. Browser-specific APIs (`window`, `document`, `navigator`) are **not available** in the PDF sandbox.
-
----
-
-## Extension Setup (for full access)
-
-To get complete history access, create a Brave extension:
-
-1. Create `manifest.json`:
+1. Create `manifest.json` in the `js/` directory:
 ```json
 {
   "manifest_version": 3,
@@ -160,85 +132,145 @@ To get complete history access, create a Brave extension:
 }
 ```
 
-2. Load extension in Brave:
-   - Go to `brave://extensions/`
-   - Enable "Developer mode"
-   - Click "Load unpacked"
-   - Select your extension folder
+2. Load in Brave: `brave://extensions/` → Developer mode → Load unpacked → Select `js/` folder
 
-3. **For incognito access**:
-   - Go to extension details
-   - Enable "Allow in incognito"
+---
+
+## C Version (`c/`)
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `brave_history.c` | Main entry point with CLI argument parsing |
+| `history_db.c/.h` | SQLite query layer for Brave's History database |
+| `export_json.c/.h` | JSON export with proper string escaping |
+| `export_pdf.c/.h` | Raw PDF generation (no external library) |
+| `platform.c/.h` | OS detection, file paths, time utilities |
+| `vendor/sqlite3.c/.h` | SQLite amalgamation (vendored, no install needed) |
+| `Makefile` | Build for GCC / MinGW |
+| `build.bat` | Windows build script (auto-detects GCC or MSVC) |
+
+### How It Works
+
+The C version takes a fundamentally different approach: it **directly reads Brave's SQLite history database** from disk. This is the most powerful method since it has unrestricted access to the full history without needing browser extensions, service workers, or special permissions.
+
+1. **Locates** Brave's `History` database using OS-specific paths
+2. **Copies** it to a temp location (Brave locks the file while running)
+3. **Queries** the `urls` table via SQLite for full browsing history
+4. **Exports** results to JSON and/or a styled multi-page PDF
+
+### Building
+
+**Windows (MinGW — recommended):**
+```bash
+cd c/
+build.bat
+```
+
+**Windows (MSVC):**
+```bash
+cd c/
+cl /O2 /Fe:brave-history.exe brave_history.c history_db.c export_json.c export_pdf.c platform.c vendor\sqlite3.c shell32.lib ole32.lib
+```
+
+**Linux / macOS:**
+```bash
+cd c/
+make
+```
+
+### Usage
+
+```bash
+# Show help
+brave-history --help
+
+# Run with defaults (prints summary to console)
+brave-history
+
+# Export last 30 days to JSON
+brave-history --json history.json --days 30
+
+# Generate styled PDF report
+brave-history --pdf report.pdf
+
+# Full export (both formats)
+brave-history --json history.json --pdf report.pdf --days 90
+
+# Use a specific database file
+brave-history --db /path/to/History --json out.json
+```
+
+### Output Format (JSON)
+
+```json
+{
+  "success": true,
+  "timestamp": "2025-04-27T13:41:27Z",
+  "error": null,
+  "stats": {
+    "total_urls": 3776,
+    "total_visits": 15420,
+    "unique_domains": 245,
+    "earliest_visit": "2025-03-28T10:15:00Z",
+    "latest_visit": "2025-04-27T13:38:10Z",
+    "most_visited_url": "https://example.com",
+    "most_visited_title": "Example",
+    "most_visited_count": 342
+  },
+  "data": [
+    {
+      "url": "https://...",
+      "title": "Page Title",
+      "visit_count": 5,
+      "typed_count": 2,
+      "last_visit_time": "2025-04-27T13:38:10Z"
+    }
+  ]
+}
+```
+
+### PDF Report
+
+The generated PDF includes:
+- **Cover page** — Dark header with orange accent, summary statistics, methodology description
+- **History listing** — Paginated table with URL, title, visit count, and date
+- **Alternating row colors** for readability
+- **Professional footer** with page numbers
 
 ---
 
 ## Brave Data Locations
 
-### Windows
-```
-%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data\Default\History
-```
-
-### macOS
-```
-~/Library/Application Support/BraveSoftware/Brave-Browser/Default/History
-```
-
-### Linux
-```
-~/.config/BraveSoftware/Brave-Browser/Default/History
-```
+| OS | Path |
+|----|------|
+| **Windows** | `%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data\Default\History` |
+| **macOS** | `~/Library/Application Support/BraveSoftware/Brave-Browser/Default/History` |
+| **Linux** | `~/.config/BraveSoftware/Brave-Browser/Default/History` |
 
 ---
 
-## v2.0 Changelog
+## ⚠️ Security Notice
 
-### Fixes
-- **CRITICAL**: Fixed Service Worker ↔ main script communication (was using incompatible message channel)
-- **CRITICAL**: SW `event.ports[0]` crash when no MessagePort was provided
-- **HIGH**: Inconsistent error return shapes across all methods → standardised `{success, data, error, timestamp}` envelope
-- **HIGH**: `registerServiceWorker()` silently returned `undefined` when SW unsupported
-- **MEDIUM**: Replaced deprecated `navigator.platform` with `navigator.userAgentData.platform` + fallback
-- **MEDIUM**: IndexedDB timestamp key collisions → auto-increment ID
-- **MEDIUM**: `initializeBraveHistoryAccess()` no longer auto-downloads a JSON file on every load
-- **MEDIUM**: Replaced deprecated `performance.navigation` with `PerformanceNavigationTiming`
-- **LOW**: Fixed premature `URL.revokeObjectURL` in `exportHistory()`
-- **LOW**: Removed redundant IndexedDB index
-- **LOW**: Added network-offline fallback in SW fetch handler
-- **LOW**: Filtered `undefined` entries from SW cache cleanup
+Due to browser security restrictions, the **JavaScript version** has limited access to incognito history. Browsers are designed to protect private browsing data:
 
-### New Features
-- PDF delivery: `generate-pdf.js` builds a self-activating PDF with embedded JS + attachments
-- `pdf-payload.js`: Acrobat-adapted payload with environment detection, export, and browser launch
-- Timeout wrapper for all async operations
-- `_result()` helper for consistent API contract
+- No persistent incognito history (by design)
+- Session-only access while running
+- Memory-based — closing incognito deletes all data
 
----
-
-## Limitations
-
-### Incognito Mode
-- **No persistent history**: By design, incognito history is not saved
-- **Session-only access**: Only current session data available
-- **Memory-based**: History exists only while incognito window is open
-- **No cross-session**: Closing incognito window deletes all data
-
-### Security Restrictions
-- File system access requires explicit user permission
-- SQLite database access is blocked in most scenarios
-- Cross-origin restrictions prevent direct database access
-- Service workers have limited lifetime in incognito
+The **C version** can access all *normal mode* history but **cannot** access incognito history either — it is never written to disk.
 
 ---
 
 ## Ethical Considerations
 
-This script is designed for:
+This toolkit is designed for:
 - Personal data backup and analysis
 - Educational purposes
 - Understanding browser data storage
 
-**Do not use for**:
+**Do not use for:**
 - Monitoring other users' browsing activity
 - Violating privacy expectations
 - Unauthorised data collection
@@ -247,32 +279,44 @@ This script is designed for:
 
 ## Troubleshooting
 
-### Extension API Not Available
-```
-Error: Chrome extension API not available
-```
-**Solution**: Install as a Brave extension with proper permissions
+### JavaScript Version
 
-### Service Worker Registration Failed
-```
-Error: Service Workers are not supported in this browser.
-```
-**Solution**: Serve files from HTTPS or localhost
+| Error | Solution |
+|-------|----------|
+| `Chrome extension API not available` | Install as a Brave extension with proper permissions |
+| `Service Workers not supported` | Serve files from HTTPS or localhost |
+| `File System Access API not available` | Use modern browser, serve from secure context |
+| `Service Worker history request timed out` | Ensure the SW is active; reload the page |
 
-### File Access Denied
-```
-Error: File System Access API not available.
-```
-**Solution**: Use modern browser and serve from secure context
+### C Version
 
-### Service Worker Timeout
-```
-Error: Service Worker history request timed out after 10000ms
-```
-**Solution**: Ensure the SW is active; try reloading the page
+| Error | Solution |
+|-------|----------|
+| `Brave Browser history database not found` | Ensure Brave is installed; use `--db` to specify path |
+| `Cannot copy history database` | Close Brave browser, or manually copy the History file |
+| `No C compiler found` (build.bat) | Install MinGW-w64 or Visual Studio Build Tools |
+| Linker errors on Linux | Ensure `-lpthread -ldl -lm` flags (handled by Makefile) |
+
+---
+
+## v2.0 Changelog
+
+### JavaScript
+- Fixed Service Worker ↔ main script communication
+- Standardised `{success, data, error, timestamp}` envelope
+- PDF delivery: `generate-pdf.js` with embedded JS + attachments
+- Timeout wrapper for async operations
+- Replaced deprecated APIs
+
+### C (New)
+- Direct SQLite database reader — full history access
+- JSON export matching JS version's envelope format
+- Styled multi-page PDF report generation (raw PDF, no library)
+- Cross-platform: Windows, macOS, Linux
+- Zero runtime dependencies (SQLite vendored)
 
 ---
 
 ## License
 
-This script is provided for educational purposes. Use responsibly and respect user privacy.
+This toolkit is provided for educational purposes. Use responsibly and respect user privacy.
