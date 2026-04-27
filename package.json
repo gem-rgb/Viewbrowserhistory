@@ -1,0 +1,15 @@
+{
+  "name": "delivery",
+  "version": "1.0.0",
+  "description": "This JavaScript script provides multiple methods to access Brave browser history, including attempts to access incognito mode history.",
+  "main": "brave-history-access.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
+  }
+}
