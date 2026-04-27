@@ -7,7 +7,12 @@
  * Layout matches the JS version: dark header bar, orange title accent,
  * cover page with stats, and a multi-page history listing.
  *
- * @version 1.0.0
+ * Architecture: Objects are written sequentially. The Pages object
+ * (which needs the full list of page Kids) is written LAST so we
+ * don't need to seek back and risk corrupting earlier objects.
+ * The Catalog references a reserved object ID for Pages.
+ *
+ * @version 2.0.0
  */
 
 #include "export_pdf.h"
@@ -30,25 +35,39 @@
 #define HEADER_HEIGHT 100.0f
 #define FOOTER_HEIGHT  30.0f
 
-/* Maximum objects we'll track for the xref table */
-#define MAX_OBJECTS 2048
+#define MAX_OBJECTS    4096
+#define MAX_PAGES       512
 
 /* ── Internal State ──────────────────────────────────────────────── */
 
 typedef struct {
     FILE   *f;
     long    offsets[MAX_OBJECTS];    /* byte offset of each object */
-    int     obj_count;
-    int     page_obj_ids[512];      /* object IDs for page objects */
+    int     obj_count;              /* highest object ID allocated */
+    int     page_obj_ids[MAX_PAGES];
     int     page_count;
-    int     pages_obj_id;           /* the /Pages object ID */
+    int     pages_obj_id;           /* reserved ID for /Pages object */
+    int     catalog_obj_id;
     int     font_helv_id;
     int     font_helv_bold_id;
     int     font_courier_id;
+    int     resources_id;
 } PdfWriter;
 
 /* ── Low-level PDF writing ───────────────────────────────────────── */
 
+/** Reserve an object ID without writing anything yet. */
+static int pdf_reserve_obj(PdfWriter *w) {
+    return ++w->obj_count;
+}
+
+/** Begin writing an object with a specific pre-reserved ID. */
+static void pdf_begin_obj_id(PdfWriter *w, int id) {
+    w->offsets[id] = ftell(w->f);
+    fprintf(w->f, "%d 0 obj\n", id);
+}
+
+/** Begin writing the next auto-numbered object. Returns the ID. */
 static int pdf_begin_obj(PdfWriter *w) {
     int id = ++w->obj_count;
     w->offsets[id] = ftell(w->f);
@@ -57,9 +76,10 @@ static int pdf_begin_obj(PdfWriter *w) {
 }
 
 static void pdf_end_obj(PdfWriter *w) {
-    (void)w;
     fprintf(w->f, "endobj\n\n");
 }
+
+/* ── String Helpers ──────────────────────────────────────────────── */
 
 /**
  * Escape a string for PDF text display.
@@ -71,17 +91,17 @@ static void pdf_escape_string(char *dst, size_t dstsize, const char *src) {
     if (!src) return;
 
     for (size_t i = 0; src[i] && j < dstsize - 2; i++) {
-        switch (src[i]) {
+        unsigned char c = (unsigned char)src[i];
+        switch (c) {
             case '(':  if (j + 2 < dstsize) { dst[j++] = '\\'; dst[j++] = '('; } break;
             case ')':  if (j + 2 < dstsize) { dst[j++] = '\\'; dst[j++] = ')'; } break;
             case '\\': if (j + 2 < dstsize) { dst[j++] = '\\'; dst[j++] = '\\'; } break;
+            case '\t': if (j + 1 < dstsize) { dst[j++] = ' '; } break;
             default:
-                /* Skip non-printable chars and chars > 127 for safety */
-                if ((unsigned char)src[i] >= 32 && (unsigned char)src[i] < 127) {
-                    dst[j++] = src[i];
-                } else if ((unsigned char)src[i] == '\t') {
-                    if (j + 1 < dstsize) dst[j++] = ' ';
+                if (c >= 32 && c < 127) {
+                    dst[j++] = (char)c;
                 }
+                /* Skip non-ASCII and control chars for PDF safety */
                 break;
         }
     }
@@ -89,29 +109,31 @@ static void pdf_escape_string(char *dst, size_t dstsize, const char *src) {
 }
 
 /**
- * Truncate a string to fit within maxchars, adding "..." if truncated.
+ * Truncate and escape a string to fit within maxchars.
  */
 static void truncate_str(char *dst, size_t dstsize, const char *src, int maxchars) {
     if (!src || !*src) {
         snprintf(dst, dstsize, "(untitled)");
         return;
     }
-    int len = (int)strlen(src);
-    if (len <= maxchars) {
+    if ((int)strlen(src) <= maxchars) {
         pdf_escape_string(dst, dstsize, src);
     } else {
         char tmp[2048];
-        strncpy(tmp, src, (size_t)maxchars - 3);
-        tmp[maxchars - 3] = '\0';
+        int copylen = maxchars - 3;
+        if (copylen < 0) copylen = 0;
+        if ((size_t)copylen >= sizeof(tmp)) copylen = (int)sizeof(tmp) - 4;
+        memcpy(tmp, src, (size_t)copylen);
+        tmp[copylen] = '\0';
         strcat(tmp, "...");
         pdf_escape_string(dst, dstsize, tmp);
     }
 }
 
-/* ── Page Content Generation ─────────────────────────────────────── */
+/* ── Page Content Streams ────────────────────────────────────────── */
 
 /**
- * Build the cover page content stream.
+ * Build the cover page content stream into buf.
  */
 static void build_cover_page(char *buf, size_t bufsize,
                               const HistoryStats *stats, const char *timestamp) {
@@ -122,13 +144,13 @@ static void build_cover_page(char *buf, size_t bufsize,
     pdf_escape_string(most_title_esc, sizeof(most_title_esc), stats->most_visited_title);
 
     snprintf(buf, bufsize,
-        /* ── Dark header background ── */
+        /* Dark header background */
         "q\n"
         "0.13 0.13 0.17 rg\n"
         "0 692 612 100 re f\n"
         "Q\n"
 
-        /* ── Title text (orange) ── */
+        /* Title (orange) */
         "BT\n"
         "/F2 26 Tf\n"
         "1 0.6 0.2 rg\n"
@@ -136,15 +158,15 @@ static void build_cover_page(char *buf, size_t bufsize,
         "(BRAVE HISTORY ACCESS) Tj\n"
         "ET\n"
 
-        /* ── Subtitle ── */
+        /* Subtitle */
         "BT\n"
         "/F1 11 Tf\n"
         "0.8 0.8 0.85 rg\n"
         "50 718 Td\n"
-        "(Browser History Access Tool — C Edition v1.0) Tj\n"
+        "(Browser History Access Tool \\227 C Edition v2.0) Tj\n"
         "ET\n"
 
-        /* ── Timestamp ── */
+        /* Timestamp */
         "BT\n"
         "/F3 9 Tf\n"
         "0.5 0.5 0.55 rg\n"
@@ -152,7 +174,7 @@ static void build_cover_page(char *buf, size_t bufsize,
         "(Generated: %s) Tj\n"
         "ET\n"
 
-        /* ── About section ── */
+        /* About section */
         "BT\n"
         "/F2 15 Tf\n"
         "0.15 0.15 0.15 rg\n"
@@ -171,7 +193,7 @@ static void build_cover_page(char *buf, size_t bufsize,
         "(providing comprehensive access to your browsing history.) Tj\n"
         "ET\n"
 
-        /* ── Statistics section ── */
+        /* Statistics header */
         "BT\n"
         "/F2 15 Tf\n"
         "0.15 0.15 0.15 rg\n"
@@ -179,12 +201,13 @@ static void build_cover_page(char *buf, size_t bufsize,
         "(Summary Statistics) Tj\n"
         "ET\n"
 
-        /* Stats background */
+        /* Stats box background */
         "q\n"
         "0.95 0.95 0.97 rg\n"
         "45 430 522 120 re f\n"
         "Q\n"
 
+        /* Stats content */
         "BT\n"
         "/F1 11 Tf\n"
         "0.15 0.15 0.15 rg\n"
@@ -200,7 +223,7 @@ static void build_cover_page(char *buf, size_t bufsize,
         "(Latest Visit:         %s) Tj\n"
         "ET\n"
 
-        /* ── Most visited ── */
+        /* Most visited */
         "BT\n"
         "/F2 15 Tf\n"
         "0.15 0.15 0.15 rg\n"
@@ -224,7 +247,7 @@ static void build_cover_page(char *buf, size_t bufsize,
         "(%s) Tj\n"
         "ET\n"
 
-        /* ── Methods section ── */
+        /* Access method */
         "BT\n"
         "/F2 15 Tf\n"
         "0.15 0.15 0.15 rg\n"
@@ -236,14 +259,14 @@ static void build_cover_page(char *buf, size_t bufsize,
         "/F1 10 Tf\n"
         "0.2 0.2 0.2 rg\n"
         "60 292 Td\n"
-        "(Direct SQLite database read — the most comprehensive method.) Tj\n"
+        "(Direct SQLite database read \\227 the most comprehensive method.) Tj\n"
         "0 -15 Td\n"
         "(Brave's History database was copied and queried directly.) Tj\n"
         "0 -15 Td\n"
         "(No browser extensions or APIs required.) Tj\n"
         "ET\n"
 
-        /* ── Security notice ── */
+        /* Security notice */
         "BT\n"
         "/F2 15 Tf\n"
         "0.15 0.15 0.15 rg\n"
@@ -259,10 +282,10 @@ static void build_cover_page(char *buf, size_t bufsize,
         "0 -15 Td\n"
         "(Do not use it to monitor others without their consent.) Tj\n"
         "0 -15 Td\n"
-        "(Incognito history is not accessible — by design.) Tj\n"
+        "(Incognito history is not accessible \\227 by design.) Tj\n"
         "ET\n"
 
-        /* ── Footer bar ── */
+        /* Footer bar */
         "q\n"
         "0.13 0.13 0.17 rg\n"
         "0 0 612 30 re f\n"
@@ -272,7 +295,7 @@ static void build_cover_page(char *buf, size_t bufsize,
         "/F1 8 Tf\n"
         "0.5 0.5 0.55 rg\n"
         "50 10 Td\n"
-        "(Brave History Access — C Edition — Page 1) Tj\n"
+        "(Brave History Access \\227 C Edition \\227 Page 1) Tj\n"
         "ET\n",
 
         timestamp,
@@ -288,14 +311,13 @@ static void build_cover_page(char *buf, size_t bufsize,
 }
 
 /**
- * Build a history listing page content stream.
- * Returns the number of entries written.
+ * Build a history listing page. Returns number of entries written.
  */
 static int build_listing_page(char *buf, size_t bufsize,
                                const HistoryResult *result,
                                int start_idx, int page_num) {
     char *p = buf;
-    char *end = buf + bufsize - 256;   /* safety margin */
+    char *end = buf + bufsize - 512;   /* safety margin */
     int written = 0;
 
     /* Header bar */
@@ -304,7 +326,6 @@ static int build_listing_page(char *buf, size_t bufsize,
         "0.13 0.13 0.17 rg\n"
         "0 752 612 40 re f\n"
         "Q\n"
-
         "BT\n"
         "/F2 14 Tf\n"
         "1 0.6 0.2 rg\n"
@@ -315,12 +336,10 @@ static int build_listing_page(char *buf, size_t bufsize,
 
     /* Column headers */
     p += snprintf(p, (size_t)(end - p),
-        /* Header background */
         "q\n"
         "0.92 0.92 0.94 rg\n"
         "40 726 532 18 re f\n"
         "Q\n"
-
         "BT\n"
         "/F2 8 Tf\n"
         "0.15 0.15 0.15 rg\n"
@@ -338,7 +357,7 @@ static int build_listing_page(char *buf, size_t bufsize,
     );
 
     float y = 714.0f;
-    float min_y = FOOTER_HEIGHT + 20.0f;
+    const float min_y = FOOTER_HEIGHT + 20.0f;
 
     for (int i = start_idx; i < result->count && y > min_y && p < end; i++) {
         const HistoryEntry *e = &result->entries[i];
@@ -349,9 +368,11 @@ static int build_listing_page(char *buf, size_t bufsize,
         char url_esc[256];
         truncate_str(url_esc, sizeof(url_esc), e->url, 35);
 
+        /* Extract short date (YYYY-MM-DD) */
         char date_short[32];
-        if (strlen(e->last_visit_time) >= 10) {
-            strncpy(date_short, e->last_visit_time, 10);
+        size_t tlen = strlen(e->last_visit_time);
+        if (tlen >= 10) {
+            memcpy(date_short, e->last_visit_time, 10);
             date_short[10] = '\0';
         } else {
             strncpy(date_short, e->last_visit_time, sizeof(date_short) - 1);
@@ -366,41 +387,11 @@ static int build_listing_page(char *buf, size_t bufsize,
         }
 
         p += snprintf(p, (size_t)(end - p),
-            "BT\n"
-            "/F3 7 Tf\n"
-            "0.2 0.2 0.2 rg\n"
-            "45 %.0f Td\n"
-            "(%d) Tj\n"
-            "ET\n"
-
-            "BT\n"
-            "/F1 7 Tf\n"
-            "0.15 0.15 0.15 rg\n"
-            "75 %.0f Td\n"
-            "(%s) Tj\n"
-            "ET\n"
-
-            "BT\n"
-            "/F3 6 Tf\n"
-            "0.25 0.25 0.55 rg\n"
-            "275 %.0f Td\n"
-            "(%s) Tj\n"
-            "ET\n"
-
-            "BT\n"
-            "/F1 7 Tf\n"
-            "0.15 0.15 0.15 rg\n"
-            "465 %.0f Td\n"
-            "(%d) Tj\n"
-            "ET\n"
-
-            "BT\n"
-            "/F3 7 Tf\n"
-            "0.3 0.3 0.3 rg\n"
-            "510 %.0f Td\n"
-            "(%s) Tj\n"
-            "ET\n",
-
+            "BT /F3 7 Tf 0.2 0.2 0.2 rg 45 %.0f Td (%d) Tj ET\n"
+            "BT /F1 7 Tf 0.15 0.15 0.15 rg 75 %.0f Td (%s) Tj ET\n"
+            "BT /F3 6 Tf 0.25 0.25 0.55 rg 275 %.0f Td (%s) Tj ET\n"
+            "BT /F1 7 Tf 0.15 0.15 0.15 rg 465 %.0f Td (%d) Tj ET\n"
+            "BT /F3 7 Tf 0.3 0.3 0.3 rg 510 %.0f Td (%s) Tj ET\n",
             y, i + 1,
             y, title_esc,
             y, url_esc,
@@ -418,18 +409,34 @@ static int build_listing_page(char *buf, size_t bufsize,
         "0.13 0.13 0.17 rg\n"
         "0 0 612 30 re f\n"
         "Q\n"
-
-        "BT\n"
-        "/F1 8 Tf\n"
-        "0.5 0.5 0.55 rg\n"
-        "50 10 Td\n"
-        "(Brave History Access — C Edition — Page %d) Tj\n"
-        "ET\n",
+        "BT /F1 8 Tf 0.5 0.5 0.55 rg 50 10 Td "
+        "(Brave History Access \\227 C Edition \\227 Page %d) Tj ET\n",
         page_num
     );
 
-    (void)(p);  /* suppress unused warning */
     return written;
+}
+
+/* ── Write a content stream + page object pair ───────────────────── */
+
+static int write_page(PdfWriter *w, const char *content, int resources_id) {
+    size_t stream_len = strlen(content);
+
+    int stream_id = pdf_begin_obj(w);
+    fprintf(w->f, "<< /Length %zu >>\n", stream_len);
+    fprintf(w->f, "stream\n");
+    fwrite(content, 1, stream_len, w->f);
+    fprintf(w->f, "\nendstream\n");
+    pdf_end_obj(w);
+
+    int page_id = pdf_begin_obj(w);
+    fprintf(w->f,
+        "<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] "
+        "/Resources %d 0 R /Contents %d 0 R >>\n",
+        w->pages_obj_id, resources_id, stream_id);
+    pdf_end_obj(w);
+
+    return page_id;
 }
 
 /* ── Main PDF Export ─────────────────────────────────────────────── */
@@ -450,47 +457,54 @@ int export_to_pdf(const HistoryResult *result, const HistoryStats *stats,
 
     /* ── PDF Header ── */
     fprintf(w.f, "%%PDF-1.4\n");
-    fprintf(w.f, "%%%c%c%c%c\n", 0xC0, 0xC1, 0xC2, 0xC3);  /* binary comment */
+    fprintf(w.f, "%%%c%c%c%c\n", 0xC0, 0xC1, 0xC2, 0xC3);
 
-    /* ── Object 1: Catalog ── */
-    int catalog_id = pdf_begin_obj(&w);
-    fprintf(w.f, "<< /Type /Catalog /Pages 2 0 R >>\n");
+    /*
+     * Object allocation strategy:
+     *   1 = Catalog (written first, references Pages by reserved ID)
+     *   2 = Pages   (RESERVED — written LAST, after all pages are known)
+     *   3 = Font Helvetica
+     *   4 = Font Helvetica-Bold
+     *   5 = Font Courier
+     *   6 = Resources
+     *   7+ = page content streams and page objects
+     *
+     * Writing Pages last avoids the seek-back corruption bug.
+     * PDF objects don't need to be in numerical order in the file.
+     */
+
+    /* Reserve IDs 1 and 2 */
+    w.catalog_obj_id = pdf_reserve_obj(&w);   /* = 1 */
+    w.pages_obj_id   = pdf_reserve_obj(&w);   /* = 2 */
+
+    /* Write Catalog (obj 1) — references Pages as "2 0 R" */
+    pdf_begin_obj_id(&w, w.catalog_obj_id);
+    fprintf(w.f, "<< /Type /Catalog /Pages %d 0 R >>\n", w.pages_obj_id);
     pdf_end_obj(&w);
 
-    /* ── Object 2: Pages (placeholder — we'll write the real one at the end) ── */
-    w.pages_obj_id = pdf_begin_obj(&w);
-    /* We'll track page IDs and rewrite this. For now, placeholder. */
-    long pages_offset = w.offsets[w.pages_obj_id]; /* remember for later */
-    /* Write a large enough placeholder */
-    fprintf(w.f, "<< /Type /Pages /Kids [                                                                                                                                                                                                                                                                          ] /Count    0 >>\n");
-    pdf_end_obj(&w);
-
-    /* ── Object 3: Font - Helvetica ── */
+    /* Fonts (obj 3, 4, 5) */
     w.font_helv_id = pdf_begin_obj(&w);
     fprintf(w.f, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\n");
     pdf_end_obj(&w);
 
-    /* ── Object 4: Font - Helvetica-Bold ── */
     w.font_helv_bold_id = pdf_begin_obj(&w);
     fprintf(w.f, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\n");
     pdf_end_obj(&w);
 
-    /* ── Object 5: Font - Courier ── */
     w.font_courier_id = pdf_begin_obj(&w);
     fprintf(w.f, "<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>\n");
     pdf_end_obj(&w);
 
-    /* ── Object 6: Resource dictionary (shared by all pages) ── */
-    int resources_id = pdf_begin_obj(&w);
+    /* Shared resources dict (obj 6) */
+    w.resources_id = pdf_begin_obj(&w);
     fprintf(w.f,
         "<< /Font << /F1 %d 0 R /F2 %d 0 R /F3 %d 0 R >> >>\n",
         w.font_helv_id, w.font_helv_bold_id, w.font_courier_id);
     pdf_end_obj(&w);
 
-    /* ── Generate pages ── */
+    /* ── Generate all pages ── */
 
-    /* Allocate a large buffer for page content */
-    size_t content_bufsize = 128 * 1024;  /* 128 KB per page */
+    size_t content_bufsize = 128 * 1024;
     char *content_buf = malloc(content_bufsize);
     if (!content_buf) {
         fprintf(stderr, "[export_pdf] Out of memory\n");
@@ -498,76 +512,34 @@ int export_to_pdf(const HistoryResult *result, const HistoryStats *stats,
         return -1;
     }
 
-    /* Page 1: Cover page */
+    /* Cover page */
     build_cover_page(content_buf, content_bufsize, stats, timestamp);
-    size_t stream_len = strlen(content_buf);
-
-    int cover_stream_id = pdf_begin_obj(&w);
-    fprintf(w.f, "<< /Length %zu >>\n", stream_len);
-    fprintf(w.f, "stream\n");
-    fwrite(content_buf, 1, stream_len, w.f);
-    fprintf(w.f, "\nendstream\n");
-    pdf_end_obj(&w);
-
-    int cover_page_id = pdf_begin_obj(&w);
-    fprintf(w.f,
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-        "/Resources %d 0 R /Contents %d 0 R >>\n",
-        resources_id, cover_stream_id);
-    pdf_end_obj(&w);
-    w.page_obj_ids[w.page_count++] = cover_page_id;
+    w.page_obj_ids[w.page_count++] = write_page(&w, content_buf, w.resources_id);
 
     /* History listing pages */
-    int entries_per_page = 48;  /* ~48 rows fit per page with our line height */
     int idx = 0;
     int page_num = 2;
 
-    while (idx < result->count) {
+    while (idx < result->count && w.page_count < MAX_PAGES) {
         int written = build_listing_page(content_buf, content_bufsize,
                                           result, idx, page_num);
         if (written == 0) break;
 
-        stream_len = strlen(content_buf);
-
-        int stream_id = pdf_begin_obj(&w);
-        fprintf(w.f, "<< /Length %zu >>\n", stream_len);
-        fprintf(w.f, "stream\n");
-        fwrite(content_buf, 1, stream_len, w.f);
-        fprintf(w.f, "\nendstream\n");
-        pdf_end_obj(&w);
-
-        int page_id = pdf_begin_obj(&w);
-        fprintf(w.f,
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-            "/Resources %d 0 R /Contents %d 0 R >>\n",
-            resources_id, stream_id);
-        pdf_end_obj(&w);
-        w.page_obj_ids[w.page_count++] = page_id;
-
+        w.page_obj_ids[w.page_count++] = write_page(&w, content_buf, w.resources_id);
         idx += written;
         page_num++;
-
-        if (w.page_count >= 500) break;  /* safety limit */
     }
 
     free(content_buf);
 
-    /* ── Rewrite the Pages object with the correct Kids array ── */
-    fseek(w.f, pages_offset, SEEK_SET);
-    fprintf(w.f, "%d 0 obj\n", w.pages_obj_id);
-
+    /* ── Write Pages object LAST (obj 2) — now we know all Kids ── */
+    pdf_begin_obj_id(&w, w.pages_obj_id);
     fprintf(w.f, "<< /Type /Pages /Kids [");
     for (int i = 0; i < w.page_count; i++) {
         fprintf(w.f, "%d 0 R ", w.page_obj_ids[i]);
     }
-    fprintf(w.f, "] /Count %d >>", w.page_count);
-
-    /* Pad to fill original placeholder space */
-    long current = ftell(w.f);
-    long original_end = pages_offset;
-    /* Find where endobj was */
-    /* We need to seek to end of file to continue writing xref */
-    fseek(w.f, 0, SEEK_END);
+    fprintf(w.f, "] /Count %d >>\n", w.page_count);
+    pdf_end_obj(&w);
 
     /* ── Cross-reference table ── */
     long xref_offset = ftell(w.f);
@@ -580,7 +552,7 @@ int export_to_pdf(const HistoryResult *result, const HistoryStats *stats,
 
     /* ── Trailer ── */
     fprintf(w.f, "trailer\n");
-    fprintf(w.f, "<< /Size %d /Root %d 0 R >>\n", w.obj_count + 1, catalog_id);
+    fprintf(w.f, "<< /Size %d /Root %d 0 R >>\n", w.obj_count + 1, w.catalog_obj_id);
     fprintf(w.f, "startxref\n");
     fprintf(w.f, "%ld\n", xref_offset);
     fprintf(w.f, "%%%%EOF\n");
