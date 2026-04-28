@@ -291,11 +291,18 @@ function handleContentData(request, sender) {
     }
 }
 
-/* ── Periodic flush on alarm ─────────────────────────────────────── */
+/* ── Flush on navigation commit (MV3 has no 'suspend' event) ─────── */
 
-/* Flush before the service worker goes idle */
-self.addEventListener('suspend', () => {
-    flushToStorage();
+/**
+ * MV3 service workers are terminated after ~30s of inactivity.
+ * There is no 'suspend' lifecycle event. Instead, we flush
+ * aggressively: immediately when buffer hits 5 entries, and
+ * on a short 5s timer as fallback for stragglers.
+ */
+chrome.webNavigation?.onCommitted?.addListener(() => {
+    if (pendingEntries.length >= 5) {
+        flushToStorage();
+    }
 });
 
 console.log('[Tracker] Background service worker loaded');
